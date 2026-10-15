@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sudoku Solver</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f6f5f1;--fg:#1d1d1b;--card:#fff;--thin:#c9c6bd;--acc:#2563eb;--sel:#dbe7ff;--btn:#fff;--mut:#6b6a64}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17181b;--fg:#ecebe6;--card:#202226;--thin:#464850;--acc:#7aa2ff;--sel:#2b3a5e;--btn:#2a2c31;--mut:#9b9a94}}
+:root[data-theme="dark"]{--bg:#17181b;--fg:#ecebe6;--card:#202226;--thin:#464850;--acc:#7aa2ff;--sel:#2b3a5e;--btn:#2a2c31;--mut:#9b9a94}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px 0 32px}
+main{width:min(92vw,460px)}
+h1{font-size:22px;margin:4px 0 12px;text-align:center}
+#board{display:grid;grid-template-columns:repeat(9,1fr);border:3px solid var(--fg);background:var(--card);border-radius:6px;overflow:hidden;user-select:none}
+.c{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:clamp(18px,6vw,28px);font-weight:600;border:1px solid var(--thin);cursor:pointer}
+.c:nth-child(9n+3),.c:nth-child(9n+6){border-right:2px solid var(--fg)}
+.c:nth-child(n+19):nth-child(-n+27),.c:nth-child(n+46):nth-child(-n+54){border-bottom:2px solid var(--fg)}
+.c.s{background:var(--sel)}.c.r{color:var(--acc);font-weight:500}
+#msg{min-height:40px;margin:10px 0;text-align:center;font-size:14px;color:var(--mut)}
+#pad{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+#pad button{width:100%;aspect-ratio:1;border-radius:12px;border:1px solid var(--thin);background:var(--btn);color:var(--fg);font-size:26px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0}
+#pad button small{font-size:11px;font-weight:500;color:var(--mut)}
+#pad button .i{font-size:24px;line-height:1}
+#pad button:active{transform:scale(.96)}
+#pad .go{background:var(--acc);border-color:var(--acc);color:#fff}#pad .go small{color:#fff}
+input[type=file]{display:none}
+</style></head><body>
+<main>
+<h1>Sudoku Solver</h1>
+<div id="board"></div>
+<div id="msg">Tap a cell and type a number, or scan / import a photo.</div>
+<div id="pad"></div>
+</main>
+<input type="file" id="scan" accept="image/*" capture="environment">
+<input type="file" id="imp" accept="image/*">
+<script>
+const g=Array(81).fill(0),rs=Array(81).fill(0);let sel=-1;
+const $=id=>document.getElementById(id),msg=t=>$('msg').textContent=t;
+const bd=$('board');for(let i=0;i<81;i++){const d=document.createElement('div');d.className='c';d.onclick=()=>{sel=i;draw()};bd.appendChild(d)}
+function draw(){[...bd.children].forEach((d,i)=>{d.textContent=g[i]||'';d.className='c'+(i==sel?' s':'')+(rs[i]?' r':'')})}
+function clearSolved(){for(let i=0;i<81;i++)if(rs[i]){g[i]=0;rs[i]=0}}
+function setCell(v){if(sel<0)return msg('Select a cell first.');clearSolved();g[sel]=v;draw()}
+// pad
+const pad=$('pad');
+function btn(html,sub,fn,cls){const b=document.createElement('button');b.innerHTML=html+(sub?`<small>${sub}</small>`:'');b.onclick=fn;if(cls)b.className=cls;pad.appendChild(b)}
+for(let n=1;n<=9;n++)btn(n,'',()=>setCell(n));
+btn('<span class="i">⌫</span>','Erase',()=>setCell(0));
+btn('<span class="i">📷</span>','Scan',()=>$('scan').click());
+btn('<span class="i">🖼️</span>','Import',()=>$('imp').click());
+btn('<span class="i">✨</span>','Solve',solveClick,'go');
+btn('<span class="i">🗑️</span>','Clear',()=>{g.fill(0);rs.fill(0);sel=-1;draw();msg('Board cleared.')});
+addEventListener('keydown',e=>{if(e.key>='1'&&e.key<='9')setCell(+e.key);else if(e.key=='Backspace'||e.key=='Delete'||e.key=='0')setCell(0);
+ else if(sel>=0&&e.key.startsWith('Arrow')){const m={ArrowLeft:-1,ArrowRight:1,ArrowUp:-9,ArrowDown:9}[e.key],n=sel+m;if(n>=0&&n<81&&!(m==-1&&sel%9==0)&&!(m==1&&sel%9==8)){sel=n;draw();e.preventDefault()}}});
+// solver (bitmask backtracking, minimum-remaining-values)
+function solve(a){const R=Array(9).fill(0),C=Array(9).fill(0),B=Array(9).fill(0),bi=i=>((i/27|0)*3)+((i%9)/3|0);
+ for(let i=0;i<81;i++)if(a[i]){const m=1<<a[i],r=i/9|0,c=i%9,b=bi(i);if((R[r]|C[c]|B[b])&m)return false;R[r]|=m;C[c]|=m;B[b]|=m}
+ const pc=x=>{let n=0;while(x){x&=x-1;n++}return n};
+ (function rec(){let best=-1,bc=10,bm=0;
+  for(let i=0;i<81;i++)if(!a[i]){const m=~(R[i/9|0]|C[i%9]|B[bi(i)])&0x3fe,n=pc(m);if(n<bc){bc=n;best=i;bm=m;if(n<2)break}}
+  if(best<0)return rec.ok=true;if(!bc)return false;
+  const r=best/9|0,c=best%9,b=bi(best);
+  for(let d=1;d<=9;d++){const m=1<<d;if(!(bm&m))continue;a[best]=d;R[r]|=m;C[c]|=m;B[b]|=m;
+   if(rec())return true;a[best]=0;R[r]&=~m;C[c]&=~m;B[b]&=~m}
+  return false})();
+ return a.every(v=>v)}
+function solveClick(){clearSolved();const a=g.slice(),given=a.filter(v=>v).length;
+ if(given<17)msg('Solving with only '+given+' clues (many solutions exist; showing one)…');
+ const t=performance.now(),ok=solve(a);
+ if(!ok){draw();return msg('No solution: the numbers on the board contradict each other. Check for wrong digits.')}
+ for(let i=0;i<81;i++)if(!g[i]){g[i]=a[i];rs[i]=1}draw();msg('Solved in '+Math.max(1,Math.round(performance.now()-t))+' ms ✔')}
+// ---------- photo → digits (no external libraries) ----------
+const F=16;
+function feat(px,bx,by,bw,bh){const sc=F/Math.max(bw,bh),ox=(F-bw*sc)/2,oy=(F-bh*sc)/2,o=new Float32Array(F*F);
+ for(let ty=0;ty<F;ty++)for(let tx=0;tx<F;tx++){let s=0;
+  for(let u=0;u<2;u++)for(let v=0;v<2;v++){const x=Math.floor(bx+(tx+(u+.5)/2-ox)/sc),y=Math.floor(by+(ty+(v+.5)/2-oy)/sc);
+   if(x>=bx&&x<bx+bw&&y>=by&&y<by+bh)s+=px(x,y)}o[ty*F+tx]=s/4}
+ const b=new Float32Array(F*F);for(let y=0;y<F;y++)for(let x=0;x<F;x++){let s=0,n=0;
+  for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){const xx=x+i,yy=y+j;if(xx>=0&&yy>=0&&xx<F&&yy<F){s+=o[yy*F+xx];n++}}b[y*F+x]=s/n}
+ return b}
+let TPL=null;
+function templates(){if(TPL)return TPL;TPL=[];const cv=document.createElement('canvas');cv.width=90;cv.height=110;const x=cv.getContext('2d',{willReadFrequently:true});
+ const fonts=['Arial','Helvetica','Verdana','Times New Roman','Georgia','Courier New','Tahoma','sans-serif','serif','monospace'];
+ for(const f of fonts)for(const w of ['400','700'])for(let d=1;d<=9;d++){
+  x.fillStyle='#fff';x.fillRect(0,0,90,110);x.fillStyle='#000';x.font=`${w} 80px "${f}",sans-serif`;x.textAlign='center';x.textBaseline='middle';x.fillText(d,45,58);
+  const im=x.getImageData(0,0,90,110).data,p=(X,Y)=>im[(Y*90+X)*4]<128?1:0;let x0=90,y0=110,x1=-1,y1=-1;
+  for(let Y=0;Y<110;Y++)for(let X=0;X<90;X++)if(p(X,Y)){x0=Math.min(x0,X);x1=Math.max(x1,X);y0=Math.min(y0,Y);y1=Math.max(y1,Y)}
+  if(x1>=0)TPL.push({d,f:feat(p,x0,y0,x1-x0+1,y1-y0+1)})}
+ return TPL}
+function classify(f){let best=1e9,bd=0;for(const t of templates()){let s=0;for(let i=0;i<F*F;i++){const e=f[i]-t.f[i];s+=e*e}if(s<best){best=s;bd=t.d}}return bd}
+async function readPhoto(file){
+ msg('Reading photo…');await new Promise(r=>setTimeout(r,30));
+ const img=await createImageBitmap(file),k=Math.min(1,1100/Math.max(img.width,img.height)),W=Math.round(img.width*k),H=Math.round(img.height*k);
+ const cv=document.createElement('canvas');cv.width=W;cv.height=H;const cx=cv.getContext('2d',{willReadFrequently:true});cx.drawImage(img,0,0,W,H);
+ const px=cx.getImageData(0,0,W,H).data,gr=new Float32Array(W*H);for(let i=0;i<W*H;i++)gr[i]=.299*px[i*4]+.587*px[i*4+1]+.114*px[i*4+2];
+ // adaptive threshold via integral image
+ const S=new Float64Array((W+1)*(H+1));for(let y=0;y<H;y++){let r=0;for(let x=0;x<W;x++){r+=gr[y*W+x];S[(y+1)*(W+1)+x+1]=S[y*(W+1)+x+1]+r}}
+ const rad=Math.round(Math.max(W,H)/40),bin=new Uint8Array(W*H);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const x0=Math.max(0,x-rad),x1=Math.min(W,x+rad+1),y0=Math.max(0,y-rad),y1=Math.min(H,y+rad+1),
+  m=(S[y1*(W+1)+x1]-S[y0*(W+1)+x1]-S[y1*(W+1)+x0]+S[y0*(W+1)+x0])/((x1-x0)*(y1-y0));bin[y*W+x]=gr[y*W+x]<m*.82?1:0}
+ // grid = connected component with the largest bounding box
+ const lab=new Uint8Array(W*H),st=new Int32Array(W*H);let bb=null,ba=0;
+ for(let s=0;s<W*H;s++){if(!bin[s]||lab[s])continue;let sp=0,n=0,x0=W,y0=H,x1=0,y1=0;st[sp++]=s;lab[s]=1;
+  while(sp){const p=st[--sp],x=p%W,y=p/W|0;n++;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
+   for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){const xx=x+i,yy=y+j;if(xx<0||yy<0||xx>=W||yy>=H)continue;const q=yy*W+xx;if(bin[q]&&!lab[q]){lab[q]=1;st[sp++]=q}}}
+  const a=(x1-x0)*(y1-y0);if(n>200&&a>ba){ba=a;bb={x0,y0,x1,y1}}}
+ if(!bb||(bb.x1-bb.x0)<W*.25||(bb.y1-bb.y0)<H*.25)bb={x0:0,y0:0,x1:W-1,y1:H-1};
+ const gw=(bb.x1-bb.x0+1)/9,gh=(bb.y1-bb.y0+1)/9,out=Array(81).fill(0);let found=0;
+ for(let r=0;r<9;r++)for(let c=0;c<9;c++){
+  const mx=Math.round(gw*.1),my=Math.round(gh*.1),sx=Math.round(bb.x0+c*gw)+mx,sy=Math.round(bb.y0+r*gh)+my,w=Math.round(gw)-2*mx,h=Math.round(gh)-2*my;
+  if(w<6||h<6)continue;const loc=new Uint8Array(w*h),L=new Uint8Array(w*h),stk=new Int32Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const X=sx+x,Y=sy+y;loc[y*w+x]=(X<W&&Y<H&&bin[Y*W+X])?1:0}
+  // drop components touching the border (leftover grid lines) and tiny specks
+  for(let s=0;s<w*h;s++){if(!loc[s]||L[s])continue;let sp=0,touch=false;const cells=[];stk[sp++]=s;L[s]=1;
+   while(sp){const p=stk[--sp],x=p%w,y=p/w|0;cells.push(p);if(x==0||y==0||x==w-1||y==h-1)touch=true;
+    for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){const xx=x+i,yy=y+j;if(xx<0||yy<0||xx>=w||yy>=h)continue;const q=yy*w+xx;if(loc[q]&&!L[q]){L[q]=1;stk[sp++]=q}}}
+   if(touch||cells.length<w*h*.012)for(const p of cells)loc[p]=0}
+  let n=0,x0=w,y0=h,x1=-1,y1=-1;for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(loc[y*w+x]){n++;x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y)}
+  if(n<w*h*.03||y1<0||(y1-y0+1)<h*.3)continue;
+  out[r*9+c]=classify(feat((x,y)=>loc[y*w+x],x0,y0,x1-x0+1,y1-y0+1));found++}
+ return{out,found}}
+async function handle(file){if(!file)return;
+ try{const{out,found}=await readPhoto(file);
+  if(!found){msg('No numbers detected. Try a clearer, straight-on photo with the whole grid visible.');return}
+  rs.fill(0);for(let i=0;i<81;i++)g[i]=out[i];sel=-1;draw();
+  msg(`Detected ${found} numbers and copied them to the board. Check them, tap any cell to fix, then press Solve.`)}
+ catch(e){msg('Could not read that image. Please try another photo.')}}
+for(const id of ['scan','imp'])$(id).onchange=e=>{handle(e.target.files[0]);e.target.value=''};
+draw();
+</script></body></html>
